@@ -11,9 +11,59 @@ package ahocorasick
 
 import (
 	"container/list"
+	"fmt"
 	"sync"
 	"sync/atomic"
 )
+
+var table = [256]byte{
+	97:  0,
+	98:  1,
+	99:  2,
+	100: 3,
+	101: 4,
+	102: 5,
+	103: 6,
+	104: 7,
+	105: 8,
+	106: 9,
+	107: 10,
+	108: 11,
+	109: 12,
+	110: 13,
+	111: 14,
+	112: 15,
+	113: 16,
+	114: 17,
+	115: 18,
+	116: 19,
+	117: 20,
+	118: 21,
+	119: 22,
+	120: 23,
+	121: 24,
+	122: 25,
+	'-': 26,
+	'.': 27,
+	'^': 28,
+	'$': 29,
+	'1': 30,
+	'2': 31,
+	'3': 32,
+	'4': 33,
+	'5': 34,
+	'6': 35,
+	'7': 36,
+	'8': 37,
+	'9': 38,
+	'0': 39,
+}
+
+const N = 40
+
+func IsValidChar(b byte) bool {
+	return table[b] > 0 || b == 'a'
+}
 
 // A node in the trie structure used to implement Aho-Corasick
 type node struct {
@@ -30,13 +80,13 @@ type node struct {
 	// The use of fixed size arrays is space-inefficient but fast for
 	// lookups.
 
-	child [256]*node // A non-nil entry in this array means that the
+	child [N]*node // A non-nil entry in this array means that the
 	// index represents a byte value which can be
 	// appended to the current node. Blices in the
 	// trie are built up byte by byte through these
 	// child node pointers.
 
-	fails [256]*node // Where to fail to (by following the fail
+	fails [N]*node // Where to fail to (by following the fail
 	// pointers) for each possible byte
 
 	suffix *node // Pointer to the longest possible strict suffix of
@@ -68,7 +118,7 @@ func (m *Matcher) findBlice(b []byte) *node {
 	n := &m.trie[0]
 
 	for n != nil && len(b) > 0 {
-		n = n.child[int(b[0])]
+		n = n.child[table[int(b[0])]]
 		b = b[1:]
 	}
 
@@ -90,7 +140,7 @@ func (m *Matcher) getFreeNode() *node {
 
 // buildTrie builds the fundamental trie structure from a set of
 // blices.
-func (m *Matcher) buildTrie(dictionary [][]byte) {
+func (m *Matcher) buildTrie(dictionary [][]byte) error {
 
 	// Work out the maximum size for the trie (all dictionary entries
 	// are distinct plus the root). This is used to preallocate memory
@@ -114,13 +164,16 @@ func (m *Matcher) buildTrie(dictionary [][]byte) {
 		n := m.root
 		var path []byte
 		for _, b := range blice {
+			if !IsValidChar(b) {
+				return fmt.Errorf("char out of range: %c", b)
+			}
 			path = append(path, b)
 
-			c := n.child[int(b)]
+			c := n.child[table[int(b)]]
 
 			if c == nil {
 				c = m.getFreeNode()
-				n.child[int(b)] = c
+				n.child[table[int(b)]] = c
 				c.b = make([]byte, len(path))
 				copy(c.b, path)
 
@@ -151,7 +204,7 @@ func (m *Matcher) buildTrie(dictionary [][]byte) {
 	for l.Len() > 0 {
 		n := l.Remove(l.Front()).(*node)
 
-		for i := 0; i < 256; i++ {
+		for i := 0; i < len(n.child); i++ {
 			c := n.child[i]
 			if c != nil {
 				l.PushBack(c)
@@ -179,7 +232,7 @@ func (m *Matcher) buildTrie(dictionary [][]byte) {
 	}
 
 	for i := 0; i < m.extent; i++ {
-		for c := 0; c < 256; c++ {
+		for c := 0; c < N; c++ {
 			n := &m.trie[i]
 			for n.child[c] == nil && !n.root {
 				n = n.fail
@@ -190,31 +243,19 @@ func (m *Matcher) buildTrie(dictionary [][]byte) {
 	}
 
 	m.trie = m.trie[:m.extent]
+	return nil
 }
 
 // NewMatcher creates a new Matcher used to match against a set of
 // blices
-func NewMatcher(dictionary [][]byte) *Matcher {
-	m := new(Matcher)
+func NewMatcher(dictionary [][]byte) (m *Matcher, err error) {
+	m = new(Matcher)
 
-	m.buildTrie(dictionary)
-
-	return m
-}
-
-// NewStringMatcher creates a new Matcher used to match against a set
-// of strings (this is a helper to make initialization easy)
-func NewStringMatcher(dictionary []string) *Matcher {
-	m := new(Matcher)
-
-	var d [][]byte
-	for _, s := range dictionary {
-		d = append(d, []byte(s))
+	if err = m.buildTrie(dictionary); err != nil {
+		return nil, err
 	}
 
-	m.buildTrie(d)
-
-	return m
+	return m, nil
 }
 
 // Match searches in for blices and returns all the blices found as indexes into
@@ -241,12 +282,12 @@ func match(in []byte, n *node, unique func(f *node) bool) []int {
 	for _, b := range in {
 		c := int(b)
 
-		if !n.root && n.child[c] == nil {
-			n = n.fails[c]
+		if !n.root && n.child[table[c]] == nil {
+			n = n.fails[table[c]]
 		}
 
-		if n.child[c] != nil {
-			f := n.child[c]
+		if n.child[table[c]] != nil {
+			f := n.child[table[c]]
 			n = f
 
 			if f.output {
@@ -312,11 +353,11 @@ func (m *Matcher) Contains(in []byte) bool {
 	for _, b := range in {
 		c := int(b)
 		if !n.root {
-			n = n.fails[c]
+			n = n.fails[table[c]]
 		}
 
-		if n.child[c] != nil {
-			f := n.child[c]
+		if n.child[table[c]] != nil {
+			f := n.child[table[c]]
 			n = f
 
 			if f.output {
