@@ -56,9 +56,10 @@ var table = [256]byte{
 	'9': 38,
 	'0': 39,
 	'_': 40,
+	// Do not forget to modify the N below.
 }
 
-const N = 40
+const N = 41
 
 func IsValidChar(b byte) bool {
 	return table[b] > 0 || b == 'a'
